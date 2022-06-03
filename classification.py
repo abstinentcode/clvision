@@ -36,7 +36,6 @@ from typing import List
 import sys
 import os
 sys.path.append('./avalanche')
-#from efficientnet_pytorch import EfficientNet
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -66,7 +65,7 @@ warnings.filterwarnings("ignore")
 import pdb
 torch.backends.cudnn.enabled = False
 # TODO: change this to the path where you downloaded (and extracted) the dataset
-DATASET_PATH = '/home/xp1/cvworkshop/data/'
+DATASET_PATH = ''
 
 
 class LinearClassifier(nn.Module):
@@ -85,54 +84,6 @@ class LinearClassifier(nn.Module):
         # linear layer
         return self.linear(x)
 
-class Vit_cls(nn.Module):
-    """Linear layer to train on top of frozen features"""
-    def __init__(self, n_classes=1000):
-        super(Vit_cls, self).__init__()
-        self.model = torch.hub.load('facebookresearch/dino:main', 'dino_vits8')
-        self.head = LinearClassifier(dim = self.model.embed_dim, num_labels = n_classes)
-
-
-    def forward(self, x):
-        x = self.model(x)
-        return self.head(x)
-
-class focal_loss(nn.Module):
-    def __init__(self, alpha=0.25, gamma=2, num_classes = 3, size_average=True):
-        super(focal_loss,self).__init__()
-        self.size_average = size_average
-        if isinstance(alpha,list):
-            assert len(alpha)==num_classes   
-            self.alpha = torch.Tensor(alpha)
-        else:
-            assert alpha<1  
-            self.alpha = torch.zeros(num_classes)
-            self.alpha[0] += alpha
-            self.alpha[1:] += (1-alpha)
-
-        self.gamma = gamma
-
-    def forward(self, preds, labels):
-        # assert preds.dim()==2 and labels.dim()==1
-        preds = preds.view(-1,preds.size(-1))
-        self.alpha = self.alpha.to(preds.device)
-        preds_softmax = F.softmax(preds, dim=1) 
-        preds_logsoft = torch.log(preds_softmax)
-        
-        #focal_loss func, Loss = -α(1-yi)**γ *ce_loss(xi,yi)
-        preds_softmax = preds_softmax.gather(1,labels.view(-1,1)) 
-        preds_logsoft = preds_logsoft.gather(1,labels.view(-1,1))
-        self.alpha = self.alpha.gather(0,labels.view(-1))
-        # torch.pow((1-preds_softmax), self.gamma) 为focal loss中 (1-pt)**γ
-        
-        loss = -torch.mul(torch.pow((1-preds_softmax), self.gamma), preds_logsoft) 
-
-        loss = torch.mul(self.alpha, loss.t())
-        if self.size_average:
-            loss = loss.mean()
-        else:
-            loss = loss.sum()
-        return loss
 
 class LabelSmoothingCrossEntropy(nn.Module):
     """
@@ -176,13 +127,6 @@ def main(args):
     # Add additional transformations here
     train_transform = Composecls(
         [transforms.Resize((224,224)),
-         #transforms.RandomGrayscale(),
-         #transforms.ColorJitter(0.5,0.5,0.5,0.5),
-         #transforms.RandomAdjustSharpness(sharpness_factor=2),
-         #transforms.RandomRotation(degrees=(0, 180)),
-         #transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 4)),
-         #transforms.RandomCrop(224, padding=5, pad_if_needed=True),
-         #transforms.RandomAffine(10),
          transforms.RandomHorizontalFlip(),
          transforms.RandomVerticalFlip(),
          ToTensor(),
@@ -204,27 +148,10 @@ def main(args):
         eval_transform=eval_transform,
         n_validation_videos=0,
         train_json_name='ego_objects_challenge_train.json',
-        test_json_name='ego_objects_challenge_test.json',   #split_ego_eval.json
+        test_json_name='ego_objects_challenge_test.json',  
     )
-    # ---------
 
-    # --- MODEL CREATION
-    
-
-    #model = models.resnet50(pretrained=True)
-    #model.fc = nn.Linear(2048, benchmark.n_classes)
-    
-    #model = models.efficientnet_v2_m(pretrained=True)    #efficientnet_b3
-    #model.avgpool=nn.AdaptiveAvgPool2d((1,1))
-    #for i,layer in enumerate(list(model.classifier)):
-    #    lastlayer=layer
-    #feature = lastlayer.in_features
-    #model.classifier = nn.Sequential(
-    #    nn.BatchNorm1d(feature),
-    #    nn.Linear(feature, benchmark.n_classes),
-    #)
-
-    model = models.regnet_x_16gf(pretrained=True)   #regnet_y_3_2gf
+    model = models.regnet_x_16gf(pretrained=True) 
     feature = model.fc.in_features
     model.avgpool=nn.AdaptiveAvgPool2d((1,1))
     model.fc = nn.Sequential(
@@ -234,7 +161,7 @@ def main(args):
 
     params = [p for p in model.parameters() if p.requires_grad]
 
-    optimizer = torch.optim.SGD(params, lr=0.002,
+    optimizer = torch.optim.SGD(params, lr=0.003,
                                 momentum=0.9, weight_decay=1e-5)
     mb_size=6
 
@@ -255,10 +182,7 @@ def main(args):
     # Avalanche already has a lot of plugins you can use!
     # Many mainstream continual learning approaches are available as plugins:
     # https://avalanche-api.continualai.org/en/latest/training.html#training-plugins
-    replay = ReplayPlugin(mem_size=3500, batch_size_mem=10, task_balanced_dataloader=True, storage_policy=ClassBalancedBuffer(max_size=3500))
-    #ewc = EWCPlugin(ewc_lambda=0.001)
-    #mas = MASPlugin()
-    #save_checkpoint = ModelCheckpoint(out_folder='./instance_classification_results_vit', file_prefix='track2_output')
+    replay = ReplayPlugin(mem_size=3500, batch_size_mem=11, task_balanced_dataloader=True, storage_policy=ClassBalancedBuffer(max_size=3500))
     mandatory_plugins = [replay,
         ClassificationOutputExporter(
             benchmark, save_folder='./instance_classification_results_vit')
@@ -287,10 +211,6 @@ def main(args):
             experience=True, stream=True
         ),
         loggers=[InteractiveLogger(),
-                #  WandBLogger(
-                #  	run_name='vit',
-                #      dir='./log/track_inst_cls/exp_' +
-                #                 datetime.datetime.now().isoformat())
                  ],
     )
     # ---------
@@ -313,11 +233,11 @@ def main(args):
     #  the methods required to implement your solution.
     cl_strategy = Naive(
         model,
-        criterion=LabelSmoothingCrossEntropy(),   #LabelSmoothingCrossEntropy(),      #CrossEntropyLoss(),    #focal_loss(num_classes = benchmark.n_classes)
+        criterion=LabelSmoothingCrossEntropy(),     #CrossEntropyLoss()
         optimizer=optimizer,
         train_mb_size=mb_size,
         train_epochs=3,
-        eval_mb_size=16,
+        eval_mb_size=mb_size,
         device=device,
         plugins=plugins,
         evaluator=evaluator,
