@@ -72,7 +72,7 @@ class MASPlugin(SupervisedPlugin):
         strategy.model.train()
         dataloader = DataLoader(
             strategy.experience.dataset,
-            batch_size=strategy.train_mb_size,)  # type: ignore
+            batch_size=strategy.train_mb_size,drop_last=True)  # type: ignore
 
         # Progress bar
         if self.verbose:
