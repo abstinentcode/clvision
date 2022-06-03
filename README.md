@@ -31,6 +31,6 @@ DATASET_PATH = ''
 ```
 5. **run the code**:
 ```bash
-python classification_base.py
+python classification.py
 ```
 the output file is ``` './instance_classification_results_vit' ```
